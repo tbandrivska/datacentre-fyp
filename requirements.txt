@@ -88,6 +88,7 @@ rfc3986-validator==0.1.1
 rfc3987-syntax==1.1.0
 rpds-py==2026.9.1
 scipy==1.18.1
+pulp==3.3.2
 Send2Trash==2.1.0
 six==1.17.0
 soupsieve==3.0.4
