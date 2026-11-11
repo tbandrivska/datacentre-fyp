@@ -8,6 +8,7 @@ modes = [1, 2, 3]  # 1 Free Air, 2 Hybrid, 3 Mechanical
 hours = list(range(24))
 
 # Workload params
+#SCENARIO_SPECIFIC!!!!!!!
 # Token geometry per inference request
 T_pre = 1000  # Input/Prefill tokens per request
 T_dec = 200   # Output/Decode tokens per request
