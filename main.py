@@ -4,6 +4,7 @@ import pulp
 # Sets and time
 gateways = ["GW_East", "GW_Central", "GW_West"]
 datacenters = ["DC_Virginia", "DC_Texas", "DC_Arizona", "DC_Washington"]
+modes = [1, 2, 3]  # 1 Free Air, 2 Hybrid, 3 Mechanical 
 hours = list(range(24))
 
 # Workload params
@@ -13,8 +14,8 @@ T_dec = 200   # Output/Decode tokens per request
 
 # Energy coefficients (Joules per token)
 # Reflecting Kazybekov (2026) empirical ~8x decode-penalty ratio
-E_pre = 0.00010  # 0.1 mJ/token
-E_dec = 0.00080  # 0.8 mJ/token
+E_pre = 0.05  # J/token
+E_dec = 0.40  # J/token
 
 # Convert per-request token energy from Joules to kWh
 # (1 kWh = 3,600,000 Joules)
@@ -27,6 +28,8 @@ capacity_IT_kW = {
     "DC_Arizona":    4000.0,
     "DC_Washington": 4000.0
 }
+#PUE cooling mode params
+pue_mode = {1: 1.05, 2: 1.15, 3: 1.35}
 # Latency params
 # Maximum allowable round-trip network propagation delay (ms)
 SLO_max = 80.0
@@ -66,6 +69,9 @@ temp_wb = {
     "DC_Arizona":    [24 + 9 * (t / 24) for t in hours],
     "DC_Washington": [8 + 3 * (t / 24) for t in hours]
 }
+#Direct WUE for mode 3 (mechanical cooling) as a function of wet-bulb temperature in celcius
+def get_wue_dir_mode3(t_wb):
+    return max(0.0, -0.0006143 * (t_wb**2) + 0.03386 * t_wb + 1.24)
 
 pue_model = {
     i: [1.05 + 0.005 * temp_wb[i][t] for t in hours]
