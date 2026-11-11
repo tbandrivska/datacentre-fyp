@@ -4,15 +4,17 @@ import numpy as np
 import pandas as pd
 import requests
 
+from datetime import datetime
+from meteostat import Point, hourly, stations
 # hub mappings config
 EIA_API_KEY = os.getenv("EIA_API_KEY", "")
 
 #US hubs
 HUBS = {
-    "DC_Virginia": {"airport": "IAD", "rto": "PJM", "state": "VA"},
-    "DC_Texas": {"airport": "DFW", "rto": "ERCOT", "state": "TX"},
-    "DC_Arizona": {"airport": "PHX", "rto": "AZPS", "state": "AZ"},
-    "DC_Washington": {"airport": "SEA", "rto": "BPAT", "state": "WA"},
+    "DC_Virginia": {"airport": "IAD", "coordinates": (38.9531, -77.4565), "rto": "PJM", "state": "VA"},
+    "DC_Texas": {"airport": "DFW", "coordinates": (32.8998, -97.0403), "rto": "ERCOT", "state": "TX"},
+    "DC_Arizona": {"airport": "PHX", "coordinates": (33.4342, -112.0116), "rto": "AZPS", "state": "AZ"},
+    "DC_Washington": {"airport": "SEA", "coordinates": (47.4502, -122.3088), "rto": "BPAT", "state": "WA"},
 }
 
 # EPA Grid Carbon Emission Factors (gCO2e per kWh generated)
@@ -44,53 +46,28 @@ def calculate_wet_bulb(T_c: pd.Series, RH: pd.Series) -> pd.Series:
   return T_wb
 
 
-def fetch_iem_weather(
-    station: str, start_date: str, end_date: str
+def fetch_meteostat_weather(
+    airport_code: str, coordinates: tuple[float, float], start_date: str, end_date: str
 ) -> pd.DataFrame:
-  """Fetches hourly dry-bulb temp (°F) and relative humidity (%) from Iowa Environmental Mesonet.
+  # Airport codes are not Meteostat station IDs; search by airport location.
+  station_list = stations.nearby(Point(*coordinates), limit=1)
+  if station_list.empty:
+    raise ValueError(f"No Meteostat station found near airport: {airport_code}")
+  station_id = station_list.index[0]
 
-  No API key required.
-  """
-  start = pd.to_datetime(start_date)
-  end = pd.to_datetime(end_date)
+  start = datetime.strptime(start_date, "%Y-%m-%d")
+  end = datetime.strptime(end_date, "%Y-%m-%d")
 
-  url = (
-      f"https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?"
-      f"station={station}&data=tmpf&data=relh&"
-      f"year1={start.year}&month1={start.month}&day1={start.day}&"
-      f"year2={end.year}&month2={end.month}&day2={end.day}&"
-      f"tz=Etc%2FUTC&format=onlycomma&missing=M"
-  )
+  data = hourly(station_id, start, end).fetch().reset_index()
 
-  response = requests.get(url, timeout=30)
-  response.raise_for_status()
-
-  # IEM may return a plain-text error page (with HTTP 200) for invalid
-  # parameters. Catch that before passing it to pandas, which otherwise
-  # reports a confusing CSV tokenization error.
-  if not response.text.lstrip().startswith("station,"):
-    raise ValueError(f"Unexpected IEM response for {station}: {response.text[:500]!r}")
-
-  # Parse CSV payload into Pandas
-  df = pd.read_csv(io.StringIO(response.text))
-
-  # Clean missing values and parse timestamps
-  df["valid"] = pd.to_datetime(df["valid"])
-  df["tmpf"] = pd.to_numeric(df["tmpf"], errors="coerce")
-  df["relh"] = pd.to_numeric(df["relh"], errors="coerce")
-  df = df.dropna(subset=["tmpf", "relh"])
-
-  # Convert Dry-Bulb from Fahrenheit to Celsius
-  df["temp_c"] = (df["tmpf"] - 32.0) * (5.0 / 9.0)
-
-  # Compute Wet-Bulb Temperature (°C)
+  df = pd.DataFrame({
+      "timestamp": data["time"],
+      "temp_c": data["temp"],
+      "relh": data["rhum"],
+  })
   df["temp_wb"] = calculate_wet_bulb(df["temp_c"], df["relh"])
-
-  # Resample to strict 1-hour frequency
-  df = df.set_index("valid").resample("1h").mean(numeric_only=True).reset_index()
-  df = df.rename(columns={"valid": "timestamp"})
-
   return df[["timestamp", "temp_c", "temp_wb"]]
+
 
 # carbon intensity data (EIA API v2)
 def fetch_eia_carbon_intensity(
@@ -171,7 +148,9 @@ if __name__ == "__main__":
     print(f"\nProcessing {dc_name} (Airport: {config['airport']}, RTO: {config['rto']})...")
 
     # 1.Fetch Weather
-    df_weather = fetch_iem_weather(config["airport"], START_DATE, END_DATE)
+    df_weather = fetch_meteostat_weather(
+        config["airport"], config["coordinates"], START_DATE, END_DATE
+    )
 
     # 2. Fetch Grid Carbon (using synthetic fallback if API key is not set)
     if not EIA_API_KEY:
