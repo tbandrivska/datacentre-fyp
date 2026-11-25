@@ -1,5 +1,6 @@
 from scipy.optimize import linprog
 import pulp
+import numpy as np
 
 # Sets and time
 gateways = ["GW_East", "GW_Central", "GW_West"]
@@ -89,12 +90,44 @@ temp_wb = {
 def get_wue_dir_mode3(t_wb):
     return max(0.0, -0.0006143 * (t_wb**2) + 0.03386 * t_wb + 1.24)
 
-pue_model = {
-    i: [1.05 + 0.005 * temp_wb[i][t] for t in hours]
-    for i in datacenters
-}
+#pue_model = {
+    #i: [1.05 + 0.005 * temp_wb[i][t] for t in hours]
+   #for i in datacenters
+# }
 
+def generate_pue(mode, datacenters, hours, temp_wb, seed=42):
 
+    rng = np.random.default_rng(seed)
+
+    if mode == "constant":
+        return {
+            i: [1.2 for t in hours]
+            for i in datacenters
+        }
+
+    elif mode == "random_static":
+        return {
+            i: [rng.uniform(1.1, 1.5)] * len(hours)
+            for i in datacenters
+        }
+
+    elif mode == "climate_aware":
+        return {
+            i: [
+                1.05 + 0.005 * temp_wb[i][t]
+                for t in hours
+            ]
+            for i in datacenters
+        }
+
+    else:
+        raise ValueError("Unknown PUE model")
+pue_model = generate_pue(
+    mode="random_static",
+    datacenters=datacenters,
+    hours=hours,
+    temp_wb=temp_wb
+)
 #  MODEL FORMULATION (PuLP)
 model = pulp.LpProblem("Stage1_SpatioTemporal_GLB", pulp.LpMinimize)
 # Decision Variable: x[j, i, t] = requests routed from Gateway j to Data Center i at hour t
