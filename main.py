@@ -189,7 +189,44 @@ print(f"Total Operational Electricity Cost: ${pulp.value(model.objective):,.2f}\
 # Aggregated summary per data center
 print(f"{'Data Center':<15} | {'Routed Requests':<15} | {'Total IT Energy (kWh)':<22} | {'Total Facility Cost ($)':<22}")
 print("-" * 80)
+#utilisation
+for i in datacenters:
+    hourly_utilisation = []
 
+    for t in hours:
+        routed_requests = sum(
+            pulp.value(x[j, i, t])
+            for j in gateways
+        )
+
+        it_power = (
+            routed_requests * kWh_per_request
+            / interval_hours
+        )
+
+        utilisation = (
+            it_power / available_capacity_kW[i]
+        ) * 100
+
+        hourly_utilisation.append(utilisation)
+
+    peak_utilisation = max(hourly_utilisation)
+
+    mean_utilisation = (
+        sum(hourly_utilisation) / len(hours)
+    )
+
+    binding_hours = sum(
+        abs(u - 100.0) <= 1e-4
+        for u in hourly_utilisation
+    )
+
+    print(
+        f"{i}: "
+        f"Peak={peak_utilisation:.2f}%, "
+        f"Mean={mean_utilisation:.2f}%, "
+        f"Binding hours={binding_hours}"
+    )
 for i in datacenters:
     total_requests_i = sum(x[j, i, t].varValue for j in gateways for t in hours)
     total_it_kwh_i = total_requests_i * kWh_per_request
