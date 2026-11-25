@@ -29,6 +29,21 @@ capacity_IT_kW = {
     "DC_Arizona":    4000.0,
     "DC_Washington": 4000.0
 }
+interval_hours = 1.0
+
+# Illustrative fraction of installed IT capacity, numbers not really based on evidence
+# allocated to the inference service
+allocated_fraction = {
+    "DC_Virginia":   0.001,
+    "DC_Texas":      0.001,
+    "DC_Arizona":   0.001,
+    "DC_Washington": 0.001
+}
+
+available_capacity_kW = {
+    i: capacity_IT_kW[i] * allocated_fraction[i]
+    for i in datacenters
+}
 #PUE cooling mode params
 pue_mode = {1: 1.05, 2: 1.15, 3: 1.35}
 # Latency params
@@ -93,16 +108,22 @@ x = {
     for i in datacenters
     for t in hours
 }
-# Objective Function: Minimise total system operational electricity cost ($)
+# Objective Function: Minimise total system electricity consumption 
 # Total Power (kW) = IT Power * PUE
-# Total Cost ($) = sum_i sum_t ( Tariff_i,t * Total_Power_i,t )
+# Total Consumption (kWh) = sum_i sum_t ( Total_Power_i,t )
 model += pulp.lpSum(
-    tariff_usd_per_kWh[i][t] * 
     (pulp.lpSum(x[j, i, t] for j in gateways) * kWh_per_request) * 
     pue_model[i][t]
     for i in datacenters for t in hours
-), "Total_Operational_Electricity_Cost"
-
+), "Total_Operational_Electricity_Consumption"
+#separate objective for carbon emission minimisation
+model_carbon = pulp.LpProblem("Stage1_SpatioTemporal_GLB_Carbon", pulp.LpMinimize)
+model_carbon += pulp.lpSum(
+    (pulp.lpSum(x[j, i, t] for j in gateways) * kWh_per_request) * 
+    pue_model[i][t] *
+    0.5  # Placeholder for carbon intensity (kg CO2e/kWh)
+    for i in datacenters for t in hours
+), "Total_Carbon_Emissions"
 
 # CONSTRAINTS
 # Constraint 1: Demand Satisfaction (All gateway queries must be assigned)
@@ -123,14 +144,42 @@ for j in gateways:
                     f"SLO_Reachability_Filter_{j}_{i}_t{t}"
                 )
 
-# Constraint 3: IT Hardware Power Capacity Limit (kW)
+# Constraint 3: Available IT power capacity
 for i in datacenters:
     for t in hours:
         model += (
-            pulp.lpSum(x[j, i, t] for j in gateways) * kWh_per_request <= capacity_IT_kW[i],
+            pulp.lpSum(
+                x[j, i, t] for j in gateways
+            ) * kWh_per_request / interval_hours
+            <= available_capacity_kW[i],
             f"IT_Capacity_Limit_{i}_t{t}"
         )
+# Illustrative parameters only
+available_gpus = {
+    "DC_Virginia":   16,
+    "DC_Texas":      16,
+    "DC_Arizona":   12,
+    "DC_Washington": 12
+}
 
+requests_per_second_per_gpu = 3.0
+
+compute_capacity_requests = {
+    i: available_gpus[i]
+       * requests_per_second_per_gpu
+       * 3600
+       * interval_hours
+    for i in datacenters
+}
+# Constraint 4: Computational throughput
+for i in datacenters:
+    for t in hours:
+        model += (
+            pulp.lpSum(
+                x[j, i, t] for j in gateways
+            ) <= compute_capacity_requests[i],
+            f"Compute_Capacity_{i}_t{t}"
+        )
 # solving
 status = model.solve(pulp.PULP_CBC_CMD(msg=False))
 
